@@ -1,33 +1,93 @@
-mod utilities;
+mod examples;
+mod kryptor;
+mod models;
 
-use crate::utilities::{decrypt_aes_gcm, derive_key, encrypt_aes_gcm};
-use base64::Engine; // For base64 encoding/decoding
+use examples::demonstrate_advanced_encryption;
+use models::{EncryptionContext, EventStore, Profile};
+use uuid::{NoContext, Timestamp, Uuid};
 
-// AES-GCM with 256-bit key
+use crate::kryptor::{config::AppConfig, errors::EncryptionError, utilities::KryptorService};
+
+fn create_sample_profile() -> Profile {
+    Profile::new(
+        "Mwaura S W".to_string(),
+        "1990-01-01".to_string(),
+        "smwaura@outlook.com".to_string(),
+        vec!["+254712345678".to_string(), "+254712345679".to_string()],
+    )
+}
+
+fn generate_aggregate_key() -> String {
+    let ts = Timestamp::from_unix(NoContext, 1497624119, 1234);
+    Uuid::new_v7(ts).to_string()
+}
+
+fn demonstrate_encryption() -> Result<(), EncryptionError> {
+    // Configuration
+    let config = AppConfig::new();
+    let aggregate_key = generate_aggregate_key();
+
+    // Create sample data
+    let profile = create_sample_profile();
+    let event_store = EventStore::with_profile(aggregate_key.clone(), profile);
+
+    // Create encryption context
+    let context = EncryptionContext::new(aggregate_key);
+
+    // Create encryption service
+    let mut kryptor_service = KryptorService::with_context(config.ikm_base64, &context)?;
+
+    println!("=== Original Data ===");
+    let json_string = serde_json::to_string_pretty(&event_store)?;
+    println!("{}", json_string);
+
+    // Encrypt the entire EventStore
+    println!("\n=== Encryption Process ===");
+    let encrypted_data = kryptor_service.encrypt_json(&event_store)?;
+    println!("🔐 Encrypted: {}", encrypted_data);
+
+    // Decrypt and verify
+    println!("\n=== Decryption Process ===");
+    let decrypted_event_store: EventStore = kryptor_service.decrypt_json(&encrypted_data)?;
+    let decrypted_json = serde_json::to_string_pretty(&decrypted_event_store)?;
+    println!("� Decrypted:");
+    println!("{}", decrypted_json);
+
+    // Verify data integrity
+    let original_json = serde_json::to_string(&event_store)?;
+    let decrypted_json_compact = serde_json::to_string(&decrypted_event_store)?;
+
+    if original_json == decrypted_json_compact {
+        println!("\n✅ Round-trip encryption/decryption successful!");
+    } else {
+        println!("\n❌ Data integrity check failed!");
+    }
+
+    // Demonstrate encrypted package
+    println!("\n=== Encrypted Package Demo ===");
+    let package = kryptor_service.create_encrypted_package(&event_store)?;
+    println!("Package created with context: {}", package.context);
+
+    let _recovered_data: EventStore = kryptor_service.decrypt_package(&package)?;
+    println!("Successfully recovered data from package");
+
+    Ok(())
+}
 
 fn main() {
-    let ikm_b64 = String::from("rph2pwTQCx+TD/lk+7o9igzQw5A7FU3+S+Z24Cf9Duk=");
-    let info_b64 = String::from("eyJiYXIiOiJiYXoifQ==");
-    let derived_key = derive_key(ikm_b64.as_str(), info_b64.as_str());
+    println!("🔐 Encryption Service Demo\n");
 
-    // Decryption
-    let encrypted_b64 = "1pEqzFnkQEa5RA35ynhOd0Ye907S9PvWIq5dRPDP3Q==";
-    let decrypted = decrypt_aes_gcm(encrypted_b64, &derived_key);
-    println!("🔓 Decrypted: {}", String::from_utf8_lossy(&decrypted));
+    // Run basic encryption demo
+    match demonstrate_encryption() {
+        Ok(()) => println!("✅ Basic encryption demo completed successfully!"),
+        Err(e) => eprintln!("❌ Basic encryption error: {}", e),
+    }
 
-    // Encryption
-    let plaintext = b"Mwaura S W";
+    println!("\n{}", "=".repeat(60));
 
-    println!("Plaintext: {}", String::from_utf8_lossy(plaintext));
-    let encrypted_new = encrypt_aes_gcm(plaintext, &derived_key);
-    println!("🔐 Encrypted: {}", encrypted_new);
-
-    // Optional: confirm round-trip
-    let round_trip = decrypt_aes_gcm(&encrypted_new, &derived_key);
-
-    println!(
-        "🔓 Decrypted Round Trip : {}",
-        String::from_utf8_lossy(&round_trip)
-    );
-    assert_eq!(plaintext, &round_trip[..]);
+    // Run advanced encryption examples
+    match demonstrate_advanced_encryption() {
+        Ok(()) => println!("\n🎉 All advanced encryption operations completed successfully!"),
+        Err(e) => eprintln!("❌ Advanced encryption error: {}", e),
+    }
 }
